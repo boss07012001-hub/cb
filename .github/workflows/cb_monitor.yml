@@ -1,0 +1,35 @@
+name: TWSE 可轉債競拍每日監控
+
+on:
+  schedule:
+    - cron: "30 0 * * 1-5"
+
+  workflow_dispatch:
+
+jobs:
+  cb-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: 🐍 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 📦 安裝依賴套件
+        run: |
+          pip install requests
+
+      - name: 🚀 執行可轉債監控程式
+        env:
+          LINE_NOTIFY_TOKEN: ${{ secrets.LINE_NOTIFY_TOKEN }}
+          EMAIL_SENDER:      ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD:    ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER:    ${{ secrets.EMAIL_RECEIVER }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python twse_cb_monitor.py
