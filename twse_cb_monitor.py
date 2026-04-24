@@ -21,7 +21,7 @@ EMAIL_RECEIVER    = os.environ.get("EMAIL_RECEIVER", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 LINE_NOTIFY_TOKEN = os.environ.get("LINE_NOTIFY_TOKEN", "")
 
-DAYS_AHEAD = 7  # 提前幾天通知（改為7天確保不漏）
+DAYS_AHEAD = 24  # 提前幾天通知（改為7天確保不漏）
 
 
 # ══════════════════════════════════════════════
