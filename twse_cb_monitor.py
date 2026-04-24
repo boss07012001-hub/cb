@@ -3,7 +3,7 @@
 """
 TWSE 可轉換公司債競拍監控系統 v3
 - 以「投標開始日」前5天發送通知
-- cb168 歷史高低價查詢連結（含搜尋提示）
+- cb168 歷史高低價查詢連結（含一鍵複製搜尋字）
 """
 
 import os
@@ -21,28 +21,25 @@ EMAIL_RECEIVER    = os.environ.get("EMAIL_RECEIVER", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 LINE_NOTIFY_TOKEN = os.environ.get("LINE_NOTIFY_TOKEN", "")
 
-DAYS_AHEAD = 5   # 投標開始日前幾天通知
-NOTIFY_FIELD = "投標開始日"   # 以此欄位為基準
+DAYS_AHEAD    = 5
+NOTIFY_FIELD  = "投標開始日"
 
 
 def fetch_auction_data() -> list[dict]:
     today = datetime.now()
     year_roc = today.year - 1911
-
     urls_to_try = [
         "https://www.twse.com.tw/rwd/zh/announcement/auction?response=json",
         f"https://www.twse.com.tw/rwd/zh/announcement/auction?response=json&year={today.year}",
         f"https://www.twse.com.tw/rwd/zh/announcement/auction?response=json&year={year_roc}",
         "https://www.twse.com.tw/zh/announcement/auction?response=json",
     ]
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.twse.com.tw/zh/announcement/auction.html",
         "Accept": "application/json, text/javascript, */*",
         "Accept-Language": "zh-TW,zh;q=0.9",
     }
-
     for url in urls_to_try:
         try:
             print(f"  嘗試 URL: {url}")
@@ -73,7 +70,6 @@ def fetch_auction_data() -> list[dict]:
         except Exception as e:
             print(f"  例外: {e}")
             continue
-
     print("⚠️ 所有 URL 均無法取得資料")
     return []
 
@@ -114,30 +110,21 @@ def get_stock_info(record: dict) -> tuple[str, str]:
 
 
 def get_upcoming_auctions(records: list[dict]) -> list[dict]:
-    """以「投標開始日」為基準，篩選前5天內需通知的項目"""
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    # 通知條件：投標開始日 在今天 到 今天+5天 之間
     threshold = today + timedelta(days=DAYS_AHEAD)
-
     upcoming = []
     for record in records:
-        # 取得投標開始日
         bid_start_val = record.get(NOTIFY_FIELD, "")
         bid_start_dt = tw_date_to_datetime(bid_start_val)
         if bid_start_dt is None:
             continue
-
-        # 取得開標日期（用於顯示）
         auction_dt = tw_date_to_datetime(record.get("開標日期", ""))
-
         if today <= bid_start_dt <= threshold:
             days_left = (bid_start_dt - today).days
             record["_bid_start_dt"] = bid_start_dt
             record["_auction_dt"]   = auction_dt
             record["_days_left"]    = days_left
             upcoming.append(record)
-
-    # 去重（以證券代號為 key）
     seen = set()
     unique = []
     for r in upcoming:
@@ -146,7 +133,6 @@ def get_upcoming_auctions(records: list[dict]) -> list[dict]:
         if key not in seen:
             seen.add(key)
             unique.append(r)
-
     return sorted(unique, key=lambda x: x["_bid_start_dt"])
 
 
@@ -187,19 +173,27 @@ def build_html(auctions: list[dict]) -> str:
         days          = a["_days_left"]
         base_name     = extract_base_name(name)
 
-        cb168_btn = f"""<a href="https://cb168.netlify.app/" target="_blank"
-          style="display:inline-block;margin-top:6px;background:#e8f4fd;
-                 color:#1565c0;border:1px solid #1565c0;border-radius:6px;
-                 padding:4px 12px;font-size:12px;text-decoration:none;">
-          🔍 點此查歷史高低價 → 進入後在搜尋框輸入「{base_name}」
-        </a>"""
+        cb168_btn = f"""
+        <div style='margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;'>
+          <a href="https://cb168.netlify.app/" target="_blank"
+            style="background:#e8f4fd;color:#1565c0;border:1px solid #1565c0;
+                   border-radius:6px;padding:4px 12px;font-size:12px;
+                   text-decoration:none;white-space:nowrap;">
+            🔍 點此查歷史高低價
+          </a>
+          <span style='font-size:12px;color:#555;'>→ 複製搜尋字：</span>
+          <code style='background:#f0f0f0;border:1px solid #ccc;border-radius:4px;
+                       padding:2px 10px;font-size:13px;font-family:inherit;
+                       color:#c0392b;font-weight:bold;cursor:text;
+                       user-select:all;'>{base_name}</code>
+        </div>"""
 
         badge_color = "#d32f2f" if days <= 1 else "#ff6f00" if days <= 3 else "#1565c0"
         rows_html += f"""
         <tr>
           <td style='padding:12px 10px;border-bottom:1px solid #eee;'>
             <b style='font-size:15px'>{name}</b><br>
-            <span style='color:#888;font-size:12px'>股票代號：{code}</span><br>
+            <span style='color:#888;font-size:12px'>股票代號：{code}</span>
             {cb168_btn}
           </td>
           <td style='padding:12px 10px;border-bottom:1px solid #eee;text-align:center;white-space:nowrap'>
@@ -216,8 +210,9 @@ def build_html(auctions: list[dict]) -> str:
     <div style='background:#fff8e1;border-left:4px solid #ff6f00;padding:12px 16px;
                 border-radius:4px;margin-top:20px;font-size:13px;color:#555;'>
       <b>📊 如何查詢歷史可轉債高低價？</b><br>
-      點上方「查歷史高低價」連結進入 cb168 網站，<br>
-      在搜尋框輸入括號內的公司名稱，即可看到該公司歷次可轉債的最高、最低成交價一覽表。
+      1. 點「查歷史高低價」按鈕進入 cb168 網站<br>
+      2. 點一下紅色文字（公司名稱）即可全選<br>
+      3. Ctrl+C 複製 → 貼到 cb168 搜尋框 → 查詢
     </div>"""
 
     return f"""<!DOCTYPE html>
@@ -266,7 +261,7 @@ def main():
         send_email(
             f"【可轉債監控警告】{today_str} 無法取得 TWSE 資料",
             "<p>今日執行時無法從 TWSE 取得競拍資料，請手動確認。</p>"
-            f"<p><a href='https://www.twse.com.tw/zh/announcement/auction.html'>點此查看官網</a></p>"
+            "<p><a href='https://www.twse.com.tw/zh/announcement/auction.html'>點此查看官網</a></p>"
         )
         return
 
