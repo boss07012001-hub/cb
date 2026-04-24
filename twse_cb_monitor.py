@@ -142,4 +142,156 @@ def get_upcoming_auctions(records: list[dict]) -> list[dict]:
     unique = []
     for r in upcoming:
         _, code = get_stock_info(r)
-        key = code o
+        key = code or str(r)
+        if key not in seen:
+            seen.add(key)
+            unique.append(r)
+
+    return sorted(unique, key=lambda x: x["_bid_start_dt"])
+
+
+def extract_base_name(name: str) -> str:
+    name = name.strip()
+    name = re.sub(r'[一二三四五六七八九十]+$', '', name)
+    name = re.sub(r'\d+$', '', name)
+    return name.strip()
+
+
+def send_email(subject: str, html_body: str) -> bool:
+    if not all([EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER]):
+        print("[跳過] Email 設定不完整")
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = EMAIL_SENDER
+        msg["To"]      = EMAIL_RECEIVER
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
+        print("✅ Email 發送成功")
+        return True
+    except Exception as e:
+        print(f"❌ Email 發送失敗：{e}")
+        return False
+
+
+def build_html(auctions: list[dict]) -> str:
+    today_str = datetime.now().strftime("%Y/%m/%d")
+    rows_html = ""
+    for a in auctions:
+        name, code = get_stock_info(a)
+        bid_start_str = a["_bid_start_dt"].strftime("%Y/%m/%d")
+        auction_str   = a["_auction_dt"].strftime("%Y/%m/%d") if a.get("_auction_dt") else "—"
+        days          = a["_days_left"]
+        base_name     = extract_base_name(name)
+
+        cb168_btn = f"""<a href="https://cb168.netlify.app/" target="_blank"
+          style="display:inline-block;margin-top:6px;background:#e8f4fd;
+                 color:#1565c0;border:1px solid #1565c0;border-radius:6px;
+                 padding:4px 12px;font-size:12px;text-decoration:none;">
+          🔍 點此查歷史高低價 → 進入後在搜尋框輸入「{base_name}」
+        </a>"""
+
+        badge_color = "#d32f2f" if days <= 1 else "#ff6f00" if days <= 3 else "#1565c0"
+        rows_html += f"""
+        <tr>
+          <td style='padding:12px 10px;border-bottom:1px solid #eee;'>
+            <b style='font-size:15px'>{name}</b><br>
+            <span style='color:#888;font-size:12px'>股票代號：{code}</span><br>
+            {cb168_btn}
+          </td>
+          <td style='padding:12px 10px;border-bottom:1px solid #eee;text-align:center;white-space:nowrap'>
+            {bid_start_str}<br>
+            <span style='color:#888;font-size:11px'>開標：{auction_str}</span>
+          </td>
+          <td style='padding:12px 10px;border-bottom:1px solid #eee;text-align:center'>
+            <span style='background:{badge_color};color:#fff;border-radius:12px;
+                         padding:3px 12px;font-size:13px;font-weight:bold'>{days} 天後</span>
+          </td>
+        </tr>"""
+
+    cb168_tip = """
+    <div style='background:#fff8e1;border-left:4px solid #ff6f00;padding:12px 16px;
+                border-radius:4px;margin-top:20px;font-size:13px;color:#555;'>
+      <b>📊 如何查詢歷史可轉債高低價？</b><br>
+      點上方「查歷史高低價」連結進入 cb168 網站，<br>
+      在搜尋框輸入括號內的公司名稱，即可看到該公司歷次可轉債的最高、最低成交價一覽表。
+    </div>"""
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW"><head><meta charset="UTF-8">
+<style>
+  body{{font-family:"Microsoft JhengHei",Arial,sans-serif;background:#f0f2f5;padding:20px;}}
+  .card{{background:#fff;border-radius:12px;padding:24px;max-width:720px;margin:auto;box-shadow:0 2px 12px rgba(0,0,0,0.1);}}
+  h2{{color:#1565c0;margin-top:0;}}
+  table{{width:100%;border-collapse:collapse;}}
+  th{{background:#1565c0;color:#fff;padding:10px 12px;text-align:left;font-size:14px;}}
+  tr:hover td{{background:#f8f9ff;}}
+  .footer{{font-size:11px;color:#aaa;text-align:center;margin-top:20px;}}
+</style></head>
+<body><div class="card">
+  <h2>🔔 可轉債競拍預警通知</h2>
+  <p style="color:#666;margin-bottom:16px">📅 通知日期：{today_str}　｜　共 <b>{len(auctions)}</b> 筆即將開放投標</p>
+  <table>
+    <tr>
+      <th>標的名稱</th>
+      <th style='text-align:center'>投標開始日 / 開標日</th>
+      <th style='text-align:center'>距投標開始</th>
+    </tr>
+    {rows_html}
+  </table>
+  {cb168_tip}
+  <p class="footer">
+    資料來源：<a href="https://www.twse.com.tw/zh/announcement/auction.html">臺灣證券交易所競價拍賣公告</a>　｜　
+    歷史高低價：<a href="https://cb168.netlify.app/">cb168.netlify.app</a><br>
+    本通知由自動化系統產生，內容僅供參考，不構成投資建議。
+  </p>
+</div></body></html>"""
+
+
+def main():
+    today_str = datetime.now().strftime("%Y/%m/%d")
+    print(f"\n{'='*55}")
+    print(f"  TWSE 可轉債競拍監控  v3  |  {today_str}")
+    print(f"{'='*55}\n")
+
+    print("📡 抓取 TWSE 競拍公告...")
+    records = fetch_auction_data()
+    print(f"   取得 {len(records)} 筆原始資料\n")
+
+    if not records:
+        print("⚠️ 無法取得資料，傳送警告 Email")
+        send_email(
+            f"【可轉債監控警告】{today_str} 無法取得 TWSE 資料",
+            "<p>今日執行時無法從 TWSE 取得競拍資料，請手動確認。</p>"
+            f"<p><a href='https://www.twse.com.tw/zh/announcement/auction.html'>點此查看官網</a></p>"
+        )
+        return
+
+    upcoming = get_upcoming_auctions(records)
+    print(f"📋 投標開始日在未來 {DAYS_AHEAD} 天內：{len(upcoming)} 筆\n")
+
+    if not upcoming:
+        print("✅ 目前無即將開放投標項目，無需通知。")
+        return
+
+    for a in upcoming:
+        name, code = get_stock_info(a)
+        print(f"  → {name}（{code}）投標開始：{a['_bid_start_dt'].strftime('%Y/%m/%d')}，距今 {a['_days_left']} 天")
+
+    print("\n📧 發送 Email 通知...")
+    subject = f"【可轉債競拍預警】{len(upcoming)} 筆即將開放投標 | {today_str}"
+    html = build_html(upcoming)
+    send_email(subject, html)
+
+    print("\n🎉 完成！")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        raise
