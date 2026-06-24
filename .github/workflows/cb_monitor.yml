@@ -3,6 +3,10 @@ on:
   schedule:
     - cron: "30 0 * * 1-5"
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   cb-monitor:
     runs-on: ubuntu-latest
